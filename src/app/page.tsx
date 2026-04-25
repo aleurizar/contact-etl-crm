@@ -126,7 +126,10 @@ export default function Home() {
   const mappedRows = useMemo(() => mapRows(rawRows, mapping), [rawRows, mapping]);
   const preview = useMemo(() => runPipeline(mappedRows, defaultPipeline), [mappedRows]);
   const contacts = useMemo<ContactRow[]>(
-    () => preview.rows.map((row) => ({ ...row, source: metadata.source })).concat(sampleContacts.slice(2)),
+    () => [
+      ...preview.rows.map((row) => ({ ...row, source: metadata.source })),
+      ...sampleContacts.slice(2).map((row) => ({ ...row, source: row.source ?? "Sin fuente" }))
+    ],
     [metadata.source, preview.rows]
   );
 
