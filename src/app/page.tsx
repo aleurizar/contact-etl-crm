@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   Check,
@@ -17,7 +17,7 @@ import clsx from "clsx";
 import { defaultPipeline, mapRows, runPipeline } from "@/lib/etl";
 import { parseContactsFile } from "@/lib/file-parser";
 import { sampleContacts, sampleMetrics, sampleRawRows } from "@/lib/mock-data";
-import type { BaseType, ColumnMapping, ContactRow, EtlStep, RawRow } from "@/lib/types";
+import type { BaseType, ColumnMapping, ContactRow, DashboardMetrics, EtlStep, RawRow } from "@/lib/types";
 import { isSupabaseConfigured } from "@/lib/supabase";
 
 const standardFieldLabels = {
@@ -112,7 +112,7 @@ function PipelineStep({ step }: { step: EtlStep }) {
 }
 
 export default function Home() {
-  const [activeStep, setActiveStep] = useState(3);
+  const [activeStep, setActiveStep] = useState(0);
   const [fileName, setFileName] = useState("contactos-expo-saas.csv");
   const [metadata, setMetadata] = useState({
     source: "Expo SaaS",
@@ -127,22 +127,40 @@ export default function Home() {
     state: "idle" | "loading" | "success" | "error";
     message: string;
   }>({ state: "idle", message: "" });
+  const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetrics>(sampleMetrics);
+  const [savedContacts, setSavedContacts] = useState<ContactRow[]>(sampleContacts);
+  const [savedSources, setSavedSources] = useState<{ source: string; count: number }[]>([]);
   const mappedRows = useMemo(() => mapRows(rawRows, mapping), [rawRows, mapping]);
   const preview = useMemo(() => runPipeline(mappedRows, defaultPipeline), [mappedRows]);
-  const contacts = useMemo<ContactRow[]>(
-    () => [
-      ...preview.rows.map((row) => ({ ...row, source: metadata.source })),
-      ...sampleContacts.slice(2).map((row) => ({ ...row, source: row.source ?? "Sin fuente" }))
-    ],
-    [metadata.source, preview.rows]
-  );
 
-  const sourceBreakdown = [
-    { source: "Expo SaaS", count: preview.rows.length },
-    { source: "Clientes historicos", count: 4120 },
-    { source: "LinkedIn Ads", count: 2310 },
-    { source: "Webinar", count: 1260 }
-  ];
+  const sourceBreakdown = savedSources.length
+    ? savedSources
+    : [
+        { source: "Expo SaaS", count: preview.rows.length },
+        { source: "Clientes historicos", count: 4120 },
+        { source: "LinkedIn Ads", count: 2310 },
+        { source: "Webinar", count: 1260 }
+      ];
+
+  const refreshDashboard = useCallback(async () => {
+    try {
+      const response = await fetch("/api/dashboard", { cache: "no-store" });
+      const result = await response.json();
+
+      if (!response.ok) return;
+
+      setDashboardMetrics(result.metrics ?? sampleMetrics);
+      setSavedContacts(result.contacts?.length ? result.contacts : sampleContacts);
+      setSavedSources(result.sources ?? []);
+    } catch {
+      setDashboardMetrics(sampleMetrics);
+      setSavedContacts(sampleContacts);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshDashboard();
+  }, [refreshDashboard]);
 
   async function handleImport() {
     if (!preview.rows.length) {
@@ -185,6 +203,7 @@ export default function Home() {
         state: "success",
         message: `Importacion completa: ${result.imported} contactos y ${result.traced} trazas guardadas.`
       });
+      await refreshDashboard();
       setActiveStep(5);
     } catch (error) {
       setImportStatus({
@@ -218,7 +237,10 @@ export default function Home() {
             >
               {isSupabaseConfigured ? "Supabase conectado" : "Modo demo"}
             </span>
-            <button className="focus-ring inline-flex items-center gap-2 rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white">
+            <button
+              className="focus-ring inline-flex items-center gap-2 rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white"
+              onClick={() => setActiveStep(0)}
+            >
               <UploadCloud className="h-4 w-4" />
               Nuevo upload
             </button>
@@ -236,6 +258,7 @@ export default function Home() {
             ))}
           </div>
 
+          {(activeStep === 0 || activeStep === 1) && (
           <div className="rounded-lg border border-line bg-white p-5 shadow-soft">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -315,7 +338,9 @@ export default function Home() {
               </div>
             </div>
           </div>
+          )}
 
+          {(activeStep === 2 || activeStep === 3) && (
           <div className="grid gap-6 xl:grid-cols-2">
             <div className="rounded-lg border border-line bg-white p-5 shadow-soft">
               <div className="flex items-center justify-between gap-3">
@@ -371,7 +396,9 @@ export default function Home() {
               </div>
             </div>
           </div>
+          )}
 
+          {(activeStep === 4 || activeStep === 5) && (
           <div className="rounded-lg border border-line bg-white p-5 shadow-soft">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -432,12 +459,13 @@ export default function Home() {
               </table>
             </div>
           </div>
+          )}
         </section>
 
         <aside className="space-y-6">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-            <Metric label="Contactos" value={sampleMetrics.total_contacts.toLocaleString("es-AR")} detail="Base maestra" />
-            <Metric label="Este mes" value={sampleMetrics.contacts_this_month.toLocaleString("es-AR")} detail="Crecimiento" />
+            <Metric label="Contactos" value={dashboardMetrics.total_contacts.toLocaleString("es-AR")} detail="Base maestra" />
+            <Metric label="Este mes" value={dashboardMetrics.contacts_this_month.toLocaleString("es-AR")} detail="Crecimiento" />
           </div>
 
           <div className="rounded-lg border border-line bg-white p-5 shadow-soft">
@@ -458,7 +486,9 @@ export default function Home() {
                   <div className="h-2 rounded-full bg-cloud">
                     <div
                       className="h-2 rounded-full bg-moss"
-                      style={{ width: `${Math.max(8, Math.min(100, (item.count / 4200) * 100))}%` }}
+                      style={{
+                        width: `${Math.max(8, Math.min(100, (item.count / Math.max(...sourceBreakdown.map((source) => source.count), 1)) * 100))}%`
+                      }}
                     />
                   </div>
                 </div>
@@ -484,7 +514,7 @@ export default function Home() {
             </label>
 
             <div className="mt-4 space-y-3">
-              {contacts.slice(0, 5).map((contact) => (
+              {savedContacts.slice(0, 5).map((contact) => (
                 <div key={contact.email} className="rounded-lg border border-line p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
