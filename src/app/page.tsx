@@ -123,6 +123,10 @@ export default function Home() {
   const columns = useMemo(() => inferColumns(rawRows), [rawRows]);
   const [mapping, setMapping] = useState<ColumnMapping>(() => detectMapping(columns));
   const [fileError, setFileError] = useState("");
+  const [importStatus, setImportStatus] = useState<{
+    state: "idle" | "loading" | "success" | "error";
+    message: string;
+  }>({ state: "idle", message: "" });
   const mappedRows = useMemo(() => mapRows(rawRows, mapping), [rawRows, mapping]);
   const preview = useMemo(() => runPipeline(mappedRows, defaultPipeline), [mappedRows]);
   const contacts = useMemo<ContactRow[]>(
@@ -139,6 +143,56 @@ export default function Home() {
     { source: "LinkedIn Ads", count: 2310 },
     { source: "Webinar", count: 1260 }
   ];
+
+  async function handleImport() {
+    if (!preview.rows.length) {
+      setImportStatus({ state: "error", message: "No hay registros validos para importar." });
+      return;
+    }
+
+    setImportStatus({ state: "loading", message: "Importando contactos en Supabase..." });
+
+    try {
+      const response = await fetch("/api/import", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          fileName,
+          metadata,
+          rawRows,
+          stats: {
+            rowsIn: preview.rowsIn,
+            rowsOut: preview.rowsOut,
+            rowsRemoved: preview.rowsRemoved
+          },
+          rows: preview.rows.map((row, index) => ({
+            ...row,
+            source: metadata.source,
+            originalRow: rawRows[index] ?? null
+          }))
+        })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "No se pudo completar la importacion.");
+      }
+
+      setImportStatus({
+        state: "success",
+        message: `Importacion completa: ${result.imported} contactos y ${result.traced} trazas guardadas.`
+      });
+      setActiveStep(5);
+    } catch (error) {
+      setImportStatus({
+        state: "error",
+        message: error instanceof Error ? error.message : "No se pudo completar la importacion."
+      });
+    }
+  }
 
   return (
     <main className="min-h-screen bg-cloud">
@@ -324,11 +378,28 @@ export default function Home() {
                 <p className="text-sm font-semibold text-moss">4. Preview e importacion</p>
                 <h2 className="mt-1 text-lg font-semibold text-ink">Resultado antes del upsert</h2>
               </div>
-              <button className="focus-ring inline-flex items-center gap-2 rounded-lg bg-moss px-4 py-2 text-sm font-semibold text-white">
+              <button
+                className="focus-ring inline-flex items-center gap-2 rounded-lg bg-moss px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={importStatus.state === "loading"}
+                onClick={handleImport}
+              >
                 <Check className="h-4 w-4" />
-                Confirmar importacion
+                {importStatus.state === "loading" ? "Importando..." : "Confirmar importacion"}
               </button>
             </div>
+
+            {importStatus.message ? (
+              <div
+                className={clsx(
+                  "mt-4 rounded-lg border px-3 py-2 text-sm font-medium",
+                  importStatus.state === "success" && "border-moss/30 bg-moss/10 text-moss",
+                  importStatus.state === "error" && "border-clay/30 bg-clay/10 text-clay",
+                  importStatus.state === "loading" && "border-line bg-cloud text-ink/70"
+                )}
+              >
+                {importStatus.message}
+              </div>
+            ) : null}
 
             <div className="mt-5 grid gap-3 sm:grid-cols-3">
               <Metric label="Entradas" value={String(preview.rowsIn)} detail="Registros leidos" />
