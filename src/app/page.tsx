@@ -130,6 +130,7 @@ export default function Home() {
   const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetrics>(sampleMetrics);
   const [savedContacts, setSavedContacts] = useState<ContactRow[]>(sampleContacts);
   const [savedSources, setSavedSources] = useState<{ source: string; count: number }[]>([]);
+  const [dashboardMode, setDashboardMode] = useState<"loading" | "demo" | "supabase" | "error">("loading");
   const mappedRows = useMemo(() => mapRows(rawRows, mapping), [rawRows, mapping]);
   const preview = useMemo(() => runPipeline(mappedRows, defaultPipeline), [mappedRows]);
 
@@ -144,17 +145,22 @@ export default function Home() {
 
   const refreshDashboard = useCallback(async () => {
     try {
-      const response = await fetch("/api/dashboard", { cache: "no-store" });
+      const response = await fetch(`/api/dashboard?ts=${Date.now()}`, { cache: "no-store" });
       const result = await response.json();
 
-      if (!response.ok) return;
+      if (!response.ok) {
+        setDashboardMode("error");
+        return;
+      }
 
       setDashboardMetrics(result.metrics ?? sampleMetrics);
       setSavedContacts(result.contacts?.length ? result.contacts : sampleContacts);
       setSavedSources(result.sources ?? []);
+      setDashboardMode(result.mode === "supabase" ? "supabase" : "demo");
     } catch {
       setDashboardMetrics(sampleMetrics);
       setSavedContacts(sampleContacts);
+      setDashboardMode("error");
     }
   }, []);
 
@@ -464,8 +470,16 @@ export default function Home() {
 
         <aside className="space-y-6">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-            <Metric label="Contactos" value={dashboardMetrics.total_contacts.toLocaleString("es-AR")} detail="Base maestra" />
-            <Metric label="Este mes" value={dashboardMetrics.contacts_this_month.toLocaleString("es-AR")} detail="Crecimiento" />
+            <Metric
+              label="Contactos"
+              value={dashboardMetrics.total_contacts.toLocaleString("es-AR")}
+              detail={dashboardMode === "supabase" ? "Base maestra real" : dashboardMode === "loading" ? "Cargando..." : "Sin lectura real"}
+            />
+            <Metric
+              label="Este mes"
+              value={dashboardMetrics.contacts_this_month.toLocaleString("es-AR")}
+              detail={dashboardMode === "supabase" ? "Crecimiento real" : "Pendiente de Supabase"}
+            />
           </div>
 
           <div className="rounded-lg border border-line bg-white p-5 shadow-soft">
